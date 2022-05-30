@@ -1,54 +1,66 @@
 const { ApolloServer, gql } = require("apollo-server-express");
 const express = require("express");
+const fs = require("fs");
+const GraphQLUpload = require("graphql-upload/GraphQLUpload.js");
+const graphqlUploadExpress = require("graphql-upload/graphqlUploadExpress.js");
 const path = require("path");
 const cors = require("cors");
-const fs = require("fs");
 const bodyParser = require("body-parser");
-const app = express();
 const typeDefs = gql`
+  scalar Upload
   type File {
     url: String!
   }
-
   type Query {
-    hello: String!
+    otherFields: Boolean!
   }
-
   type Mutation {
     uploadFile(file: Upload!): File!
   }
 `;
-const generateRandom = () =>
-  Math.random().toString(36).substring(2, 15) +
-  Math.random().toString(23).substring(2, 5);
 
+const fileRenamer = (filename) => {
+  const queHoraEs = Date.now();
+  const regex = /[\s_-]/gi;
+  const fileTemp = filename.replace(regex, ".");
+  let arrTemp = [fileTemp.split(".")];
+  return `${arrTemp[0]
+    .slice(0, arrTemp[0].length - 1)
+    .join("_")}${queHoraEs}.${arrTemp[0].pop()}`;
+};
 const resolvers = {
-  Query: {
-    hello: () => "Hello world!",
-  },
-
+  Upload: GraphQLUpload,
   Mutation: {
     uploadFile: async (_, { file }) => {
-      const { createReadStream, filename } = await file;
-      const { ext, name } = path.parse(filename);
-      const uniquename = generateRandom() + name.split(" ").join("_") + ext;
+      const { createReadStream, filename, mimetype } = await file;
       const stream = createReadStream();
-      const pathname = path.join(__dirname, `public/images/${uniquename}`);
-      await stream.pipe(fs.createWriteStream(pathname));
-      return { url: `http://localhost:4000/images/${uniquename}` };
+      const assetUniqName = fileRenamer(filename);
+      const pathName = path.join(__dirname, `public/images/${assetUniqName}`);
+      await stream.pipe(fs.createWriteStream(pathName));
+      const url = `http://localhost:4001/images/${assetUniqName}`;
+      return { url };
     },
   },
 };
 
-const server = new ApolloServer({
-  typeDefs,
-  resolvers,
-});
-
-server.applyMiddleware({ app });
-app.use(express.static(path.join(__dirname, "public")));
-app.use(cors());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.listen({ port: 4000 }, () => {
-  console.log(`🚀 Server ready at http://localhost:4000`);
-});
+async function startServer() {
+  const server = new ApolloServer({ typeDefs, resolvers });
+  await server.start();
+  const app = express();
+  app.use(graphqlUploadExpress());
+  server.applyMiddleware({ app });
+  app.use(cors());
+  app.use(express.static(path.join(__dirname, "public")));
+  app.use(express.static("public"));
+  app.use(bodyParser.urlencoded({ extended: true }));
+  //   await new Promise((r) => app.listen({ port: 4001 }, r));
+  //   console.log(
+  //     `🚀 Server ready at     http://localhost:4001${server.graphqlPath}`
+  //   );
+  app.listen({ port: 4001 }, () => {
+    console.log(
+      `🚀 Server ready at http://localhost:4001${server.graphqlPath}`
+    );
+  });
+}
+startServer();
